@@ -1,0 +1,5 @@
+db.duckdb
+poetry.lock
+.venv
+
+
