@@ -80,7 +80,7 @@ def create_tables():
                 AvailabilitePreferencesID INTEGER PRIMARY KEY,
                 TimeslotID INTEGER,
                 EmployeeID INTEGER,
-                Row2 TEXT,
+                -- Add additional fields as needed
                 FOREIGN KEY (TimeslotID) REFERENCES Timeslot(TimeslotID),
                 FOREIGN KEY (EmployeeID) REFERENCES Employees(EmployeeID)
             );
