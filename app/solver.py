@@ -35,3 +35,32 @@ for e in range(num_employees):
         # The sum of transitions should be <= 2 (one start and one end)
         model.Add(sum(transition_vars) <= 2)
 
+# Check minimum and maximum hours constraints (daily and weekly)
+for e in range(num_employees):
+    # Aggregate weekly worked hours using list comprehension
+    weekly_worked_hours = [timeslots_vars[(e, d, h)] for d in range(num_days) for h in range(hours_blocks)]
+    
+    # Weekly constraints
+    model.Add(sum(weekly_worked_hours) >= employees[e].WeeklyMinHours)
+    model.Add(sum(weekly_worked_hours) <= employees[e].WeeklyMaxHours)
+    
+    # Weekly optimal hours soft constraint
+    weekly_delta = model.NewIntVar(-168, 168, f'weekly_delta_{e}')
+    model.Add(weekly_delta == sum(weekly_worked_hours) - employees[e].WeeklyOptHours)
+    
+    for d in range(num_days):
+        # Aggregate daily worked hours using list comprehension
+        daily_worked_hours = [timeslots_vars[(e, d, h)] for h in range(hours_blocks)]
+        
+        # Daily constraints
+        model.Add(sum(daily_worked_hours) >= employees[e].DailyMinHours)
+        model.Add(sum(daily_worked_hours) <= employees[e].DailyMaxHours)
+        
+        # Daily optimal hours soft constraint
+        daily_delta = model.NewIntVar(-24, 24, f'daily_delta_{e}_{d}')
+        model.Add(daily_delta == sum(daily_worked_hours) - employees[e].DailyOptHours)
+
+
+
+
+
