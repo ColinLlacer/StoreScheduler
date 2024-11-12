@@ -1,6 +1,10 @@
 from ortools.sat.python import cp_model
 import duckdb
 import polars as pl
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Connect to the database
 con = duckdb.connect("db.duckdb")
