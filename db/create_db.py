@@ -70,6 +70,8 @@ def create_tables():
                 TimeslotID INTEGER PRIMARY KEY,
                 CodeID INTEGER,
                 Datetime TIMESTAMP,
+                Day INTEGER,
+                Hour INTEGER,
                 FOREIGN KEY (CodeID) REFERENCES Codes(CodeID)
             );
         """)

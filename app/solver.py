@@ -119,41 +119,57 @@ for e in range(num_employees):
     model.Add(sum(consecutive_days_off) >= 1)
 
 
-    #Ensure that the workload by skill for each timeslot is respected.
-    for ts in range(num_timeslots):
-        for skill in skills:
-            # Retrieve workload requirements for the current timeslot and skill
-            workload = workload_df.filter(
-                (pl.col('TimeslotID') == ts) & 
-                (pl.col('SkillID') == skill)
+# Ensure that the workload by skill for each timeslot is respected.
+# This constraint supposes that an employee with multiple skills can fill only one timeslot at the same time. Might not be true for all cases.
+for ts in range(num_timeslots):
+    for skill in skills:
+        # Retrieve workload requirements for the current timeslot and skill
+        workload = workload_df.filter(
+            (pl.col('TimeslotID') == ts) & 
+            (pl.col('SkillID') == skill)
+        )
+        if workload.height == 0:
+            logging.debug(
+                f"No workload defined for TimeslotID {ts} and SkillID {skill}. Skipping constraint."
             )
-            if workload.height == 0:
-                logging.debug(f"No workload defined for TimeslotID {ts} and SkillID {skill}. Skipping constraint.")
-                continue
-            min_workload = workload.row(0)['MinAmount']
-            opt_workload = workload.row(0)['OptAmount']
-            
-            # Identify employees who have the required skill
-            eligible_employees = employees_skills_df.filter(
-                pl.col('SkillID') == skill
-            ).select('EmployeeID').to_series().to_list()
-            
-            if not eligible_employees:
-                logging.warning(f"No employees found with SkillID {skill} for TimeslotID {ts}.")
-                model.Add(0 >= min_workload)  # This will make the model infeasible if min_workload > 0
-                continue
-            
-            # Get datetime from timeslot and extract day and hour
-            timeslot_datetime = timeslots_df.filter(
-                pl.col('TimeslotID') == ts
-            ).select('Datetime').row(0)[0]
-            
-            # Extract day index (0-6) and hour (0-23) from datetime
-            day = timeslot_datetime.weekday()  # 0 = Monday, 6 = Sunday
-            hour = timeslot_datetime.hour
-            
-            assigned_vars = [timeslots_vars[(e, day, hour)] for e in eligible_employees]
-            
-            # Add constraints to meet the minimum workload and not exceed the optimal workload
-            model.Add(sum(assigned_vars) >= min_workload)            
-            model.Add(sum(assigned_vars) <= opt_workload)
+            continue
+        min_workload = workload.row(0)['MinAmount']
+        opt_workload = workload.row(0)['OptAmount']
+        
+        # Identify employees who have the required skill
+        eligible_employees = employees_skills_df.filter(
+            pl.col('SkillID') == skill
+        ).select('EmployeeID').to_series().to_list()
+        
+        if not eligible_employees:
+            logging.warning(
+                f"No employees found with SkillID {skill} for TimeslotID {ts}."
+            )
+            model.Add(0 >= min_workload)  # This will make the model infeasible if min_workload > 0
+            continue
+        
+        # Get day and hour directly from timeslots dataframe
+        timeslot_row = timeslots_df.filter(pl.col('TimeslotID') == ts)
+        day = timeslot_row.select('Day').row(0)[0]
+        hour = timeslot_row.select('Hour').row(0)[0]
+        
+        assigned_vars = [timeslots_vars[(e, day, hour)] for e in eligible_employees]
+        
+        # Add constraints to meet the minimum workload and not exceed the optimal workload
+        model.Add(sum(assigned_vars) >= min_workload)
+        model.Add(sum(assigned_vars) <= opt_workload)
+    
+    # Constraint: An employee should not be booked multiple times in the same timeslot
+    for e in range(num_employees):
+        # Get day and hour directly from timeslots dataframe
+        timeslot_row = timeslots_df.filter(pl.col('TimeslotID') == ts)
+        day = timeslot_row.select('Day').row(0)[0] 
+        hour = timeslot_row.select('Hour').row(0)[0]
+        
+        # Sum assignments across all skills for the employee in this timeslot
+        employee_assignments = [
+            timeslots_vars[(e, day, hour)] for skill in skills
+        ]
+        
+        # Ensure the employee is assigned to at most one skill in this timeslot
+        model.Add(sum(employee_assignments) <= 1)
