@@ -52,6 +52,7 @@ for e in range(num_employees):
         # If the sum of shifts == 0, then work_var = 0
         model.Add(sum(timeslots_vars[(e, d, h)] for h in range(hours_blocks)) == 0).OnlyEnforceIf(work_var.Not())
 
+
 # Add transition constraints to ensure that timeslots assigned to an employee are consecutive
 for e in range(num_employees):
     for d in range(num_days):
@@ -68,6 +69,24 @@ for e in range(num_employees):
         
         # The sum of transitions should be <= 2 (one start and one end)
         model.Add(sum(transition_vars) <= 2)
+
+
+# Add constraint: At least two consecutive days off
+for e in range(num_employees):
+    # List to hold auxiliary variables indicating two consecutive days off
+    consecutive_days_off = []
+    for d in range(num_days - 1):
+        # Create an auxiliary variable for days d and d+1 being off
+        both_off = model.NewBoolVar(f"both_off_e{e}_d{d}_d{d+1}")
+        consecutive_days_off.append(both_off)
+        
+        # Define the relationship:
+        # both_off == 1 if and only if work_e_d[e][d] == 0 AND work_e_d[e][d+1] == 0
+        model.Add(work_e_d[e][d] == 0).OnlyEnforceIf(both_off)
+        model.Add(work_e_d[e][d+1] == 0).OnlyEnforceIf(both_off)
+    
+    # Ensure that at least one pair of consecutive days off exists
+    model.Add(sum(consecutive_days_off) >= 1)
 
 
 
@@ -98,29 +117,12 @@ for e in range(num_employees):
         # Daily constraints
         model.Add(sum(daily_worked_hours) >= daily_min)
         model.Add(sum(daily_worked_hours) <= daily_max)
-        
-
-
-# Add constraint: At least two consecutive days off
-for e in range(num_employees):
-    # List to hold auxiliary variables indicating two consecutive days off
-    consecutive_days_off = []
-    for d in range(num_days - 1):
-        # Create an auxiliary variable for days d and d+1 being off
-        both_off = model.NewBoolVar(f"both_off_e{e}_d{d}_d{d+1}")
-        consecutive_days_off.append(both_off)
-        
-        # Define the relationship:
-        # both_off == 1 if and only if work_e_d[e][d] == 0 AND work_e_d[e][d+1] == 0
-        model.Add(work_e_d[e][d] == 0).OnlyEnforceIf(both_off)
-        model.Add(work_e_d[e][d+1] == 0).OnlyEnforceIf(both_off)
-    
-    # Ensure that at least one pair of consecutive days off exists
-    model.Add(sum(consecutive_days_off) >= 1)
 
 
 # Ensure that the workload by skill for each timeslot is respected.
-# This constraint supposes that an employee with multiple skills can fill only one timeslot at the same time. Might not be true for all cases.
+# This constraint supposes that an employee with multiple skills can fill only one timeslot at the same time. Might not be true for all cases, should be an input of the future function.
+# It also supposes that an employee can go from using one skill to another in the same work day (no friction).
+# OPTIMAL WORKLOAD PER TIMESLOT TO BE ADDED HERE
 
 # Preprocess workload data and skills to employee mapping into dictionnaries for quick access
 workload_dict = {
@@ -173,7 +175,8 @@ for ts in range(num_timeslots):
 
         # Add constraints to meet the minimum and optimal workload
         model.Add(sum(assigned_vars) >= min_workload)
-        model.Add(sum(assigned_vars) <= opt_workload)
+
+        #DELTA TO OPTIMAL WORKLOAD TO BE ADDED HERE
 
     # Constraint: An employee should not be booked multiple times in the same timeslot
     for e in range(num_employees):
