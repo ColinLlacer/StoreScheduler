@@ -1,4 +1,4 @@
-# Store Scheduler
+# Store Scheduler (WIP + has to be refactored)
 
 ## Overview
 A Python-based scheduling system designed to optimize employee scheduling for retail stores. This project uses advanced optimization techniques (Constraint Programming with OR-Tools) to create efficient work schedules while considering employee availability, skills, and store requirements.
