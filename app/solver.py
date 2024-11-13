@@ -29,6 +29,8 @@ num_days = con.execute("SELECT COUNT(DISTINCT DATE(Datetime)) as days FROM Times
 num_timeslots = timeslots_df.height
 skills = con.execute("SELECT DISTINCT SkillID FROM Workload").fetchall()
 
+manager_employee_ids = con.execute("SELECT EmployeeID FROM Employees WHERE RoleID = 1").fetchall()
+
 
 # Initialize dictionaries to store variables
 timeslots_vars = {}
@@ -186,3 +188,16 @@ for ts in range(num_timeslots):
         if employee_assignments:
             # Ensure the employee is assigned to at most one skill in this timeslot
             model.Add(sum(employee_assignments) <= 1)
+
+    # A manager should be assigned when workload is not zero
+        if min_workload > 0:
+            # Ensure at least one Manager is assigned when workload is not zero
+            manager_assignments = [
+                timeslots_vars[(e, day, hour)]
+                for e in manager_employee_ids
+                if (e, day, hour) in timeslots_vars
+            ]
+            if manager_assignments:
+                model.Add(sum(manager_assignments) >= 1)
+            else:
+                logging.warning(f"No valid manager assignments found for day {day}, hour {hour}")
