@@ -21,6 +21,7 @@ def create_tables():
         con.execute("DROP TABLE IF EXISTS Store;")
         con.execute("DROP TABLE IF EXISTS Roles;")
         con.execute("DROP TABLE IF EXISTS Status;")
+        logging.info("Dropped existing tables successfully.")
 
         # SQL statements to create tables
         con.execute("""
@@ -82,7 +83,6 @@ def create_tables():
                 AvailabilitePreferencesID INTEGER PRIMARY KEY,
                 TimeslotID INTEGER,
                 EmployeeID INTEGER,
-                -- Add additional fields as needed
                 FOREIGN KEY (TimeslotID) REFERENCES Timeslot(TimeslotID),
                 FOREIGN KEY (EmployeeID) REFERENCES Employees(EmployeeID)
             );
@@ -131,11 +131,13 @@ def create_tables():
         """)
         logging.info("Created table: Workload")
 
+        logging.info("All tables created successfully.")
+
     except Exception as e:
-        logging.error(f"An error occurred: {e}")
+        logging.error(f"An error occurred while creating tables: {e}")
     finally:
         con.close()
         logging.info("Database connection closed.")
 
 if __name__ == "__main__":
-    create_tables()
+    create_tables() 
