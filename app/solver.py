@@ -15,6 +15,7 @@ from app.config import (
     ENABLE_CONSECUTIVE_DAYS_OFF,
     ENABLE_HOURS,
     ENABLE_WORKLOAD,
+    ENABLE_AVAILABILITY
 )
 
 # Configure logging
@@ -287,7 +288,47 @@ def add_workload_constraints(model, workload_dict, skill_to_employees, timeslots
     logging.info("Workload constraints added successfully.")
 
 
-def setup_constraints(model, timeslots_vars, work_e_d, employees_df, workload_dict, skill_to_employees, timeslots_df, skills, num_employees, num_days, hours_blocks, num_timeslots, manager_employee_ids, all_employee_ids, enable_work_indicator=True, enable_transition=True, enable_consecutive_days_off=True, enable_hours=True, enable_workload=True):
+def add_availability_constraints(model, timeslots_vars, availability_df, num_employees, num_days, hours_blocks):
+    """
+    Adds constraints to ensure employees are only assigned to available timeslots.
+
+    Args:
+        model (cp_model.CpModel): The CP model.
+        timeslots_vars (dict): Dictionary of shift variables.
+        availability_df (pl.DataFrame): DataFrame containing availability preferences.
+        num_employees (int): Number of employees.
+        num_days (int): Number of days.
+        hours_blocks (int): Number of hourly blocks per day.
+    """
+    logging.info("Adding availability constraints.")
+    try:
+        # Create a set of unavailable (EmployeeID, Day, Hour) tuples
+        unavailable = set()
+        for row in availability_df.iter_rows(named=True):
+            employee_id = row['EmployeeID']
+            day = row['Day']
+            hour = row['Hour']
+            unavailable.add((employee_id, day, hour))
+
+        for e in range(num_employees):
+            for d in range(num_days):
+                for h in range(hours_blocks):
+                    if (e, d, h) in unavailable:
+                        model.Add(timeslots_vars[(e, d, h)] == 0)
+                        logging.debug(f"Employee {e} is unavailable on Day {d}, Hour {h}.")
+        logging.info("Availability constraints added successfully.")
+    except Exception as e:
+        logging.error(f"An error occurred while adding availability constraints: {e}")
+        logging.error(traceback.format_exc())
+
+
+
+def setup_constraints(model, timeslots_vars, work_e_d, employees_df, workload_dict, skill_to_employees, 
+                     timeslots_df, skills, num_employees, num_days, hours_blocks, num_timeslots, 
+                     manager_employee_ids, all_employee_ids, availability_df, roles_df, 
+                     store_assignments_df, enable_availability=True, enable_status=True, 
+                     enable_role_based=True, enable_store_assignment=True, enable_work_indicator=True, 
+                     enable_transition=True, enable_consecutive_days_off=True, enable_hours=True, enable_workload=True):
     """
     Sets up all constraints based on the provided flags.
 
@@ -306,6 +347,13 @@ def setup_constraints(model, timeslots_vars, work_e_d, employees_df, workload_di
         num_timeslots (int): Number of timeslots.
         manager_employee_ids (list): List of EmployeeIDs who are managers.
         all_employee_ids (list): List of all EmployeeIDs.
+        availability_df (pl.DataFrame): DataFrame containing availability preferences.
+        roles_df (pl.DataFrame): DataFrame containing role information.
+        store_assignments_df (pl.DataFrame): DataFrame containing employee-store assignments.
+        enable_availability (bool): Flag to enable/disable availability constraints.
+        enable_status (bool): Flag to enable/disable status constraints.
+        enable_role_based (bool): Flag to enable/disable role-based constraints.
+        enable_store_assignment (bool): Flag to enable/disable store assignment constraints.
         enable_work_indicator (bool): Flag to enable/disable work indicator constraints.
         enable_transition (bool): Flag to enable/disable transition constraints.
         enable_consecutive_days_off (bool): Flag to enable/disable consecutive days off constraints.
@@ -313,6 +361,9 @@ def setup_constraints(model, timeslots_vars, work_e_d, employees_df, workload_di
         enable_workload (bool): Flag to enable/disable workload constraints.
     """
     logging.info("Setting up constraints.")
+
+    if enable_availability:
+        add_availability_constraints(model, timeslots_vars, availability_df, num_employees, num_days, hours_blocks)
 
     if enable_work_indicator:
         add_work_indicator_constraints(model, timeslots_vars, work_e_d, num_employees, num_days, hours_blocks)
@@ -351,6 +402,7 @@ def main():
             timeslots_df = pl.from_pandas(con.execute("SELECT * FROM Timeslot").fetchdf())
             employees_skills_df = pl.from_pandas(con.execute("SELECT * FROM EmployeesSkills").fetchdf())
             workload_df = pl.from_pandas(con.execute("SELECT * FROM Workload").fetchdf())
+            availability_df = pl.from_pandas(con.execute("SELECT * FROM Availability_Preferences").fetchdf())
 
             # Retrieve basic parameters
             num_employees = employees_df.height
@@ -417,6 +469,8 @@ def main():
                 num_timeslots=num_timeslots,
                 manager_employee_ids=manager_employee_ids,
                 all_employee_ids=all_employee_ids,
+                availability_df=availability_df,
+                enable_availability=ENABLE_AVAILABILITY,
                 enable_work_indicator=ENABLE_WORK_INDICATOR,
                 enable_transition=ENABLE_TRANSITION,
                 enable_consecutive_days_off=ENABLE_CONSECUTIVE_DAYS_OFF,
