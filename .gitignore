@@ -2,4 +2,9 @@ db.duckdb
 poetry.lock
 .venv
 
+# Python byte-compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+
 

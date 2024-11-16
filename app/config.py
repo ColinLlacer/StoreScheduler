@@ -1,7 +1,7 @@
 import logging
 
 # Database configuration
-DATABASE_PATH = "db.duckdb"
+DATABASE_PATH = "db/db.duckdb"
 
 # Logging configuration
 LOG_LEVEL = logging.INFO

@@ -1,13 +1,15 @@
 import duckdb
 import logging
+import os
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def create_tables():
     try:
-        # Connect to DuckDB
-        con = duckdb.connect("db.duckdb")
+        # Connect to DuckDB in the db folder
+        db_path = os.path.join(os.path.dirname(__file__), "db.duckdb")
+        con = duckdb.connect(db_path)
         logging.info("Connected to the database successfully.")
 
         # Drop tables if they exist in reverse order of dependencies
@@ -140,4 +142,4 @@ def create_tables():
         logging.info("Database connection closed.")
 
 if __name__ == "__main__":
-    create_tables() 
+    create_tables()

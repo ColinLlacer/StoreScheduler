@@ -1,8 +1,10 @@
 import logging
 import traceback
+
 from ortools.sat.python import cp_model
 import duckdb
 import polars as pl
+
 from app.config import (
     DATABASE_PATH,
     LOG_LEVEL,
@@ -101,6 +103,7 @@ def add_consecutive_days_off_constraints(model, work_e_d, num_employees, num_day
     logging.info("Consecutive days off constraints added successfully.")
 
 
+# TO DO: add optimal hours constraints
 def add_hour_constraints(model, timeslots_vars, employees_df, num_employees, num_days, hours_blocks):
     """
     Adds constraints for minimum and maximum working hours per day and week.
@@ -126,7 +129,6 @@ def add_hour_constraints(model, timeslots_vars, employees_df, num_employees, num
                 weekly_opt = employee_row.WeeklyOptHours
             else:
                 # Fallback to integer indices based on schema
-                # Adjust the indices based on the actual order of columns in your DataFrame
                 weekly_min = employee_row[employees_df.columns.index("WeeklyMinHours")]
                 weekly_max = employee_row[employees_df.columns.index("WeeklyMaxHours")]
                 weekly_opt = employee_row[employees_df.columns.index("WeeklyOptHours")]
@@ -173,8 +175,9 @@ def add_hour_constraints(model, timeslots_vars, employees_df, num_employees, num
             continue
     logging.info("Hour constraints added successfully.")
 
+
 # TO DO: add optimal workload constraints
-def add_workload_constraints(model, workload_dict, skill_to_employees, timeslots_vars, timeslots_df, skills, num_timeslots, num_days, hours_blocks, manager_employee_ids):
+def add_workload_constraints(model, workload_dict, skill_to_employees, timeslots_vars, timeslots_df, skills, num_timeslots, num_days, hours_blocks, manager_employee_ids, all_employee_ids):
     """
     Adds constraints to ensure workload by skill for each timeslot is respected.
 
@@ -189,6 +192,7 @@ def add_workload_constraints(model, workload_dict, skill_to_employees, timeslots
         num_days (int): Number of days.
         hours_blocks (int): Number of hourly blocks per day.
         manager_employee_ids (list): List of EmployeeIDs who are managers.
+        all_employee_ids (list): List of all EmployeeIDs.
     """
     logging.info("Adding workload constraints.")
     for ts in range(1, num_timeslots + 1):
@@ -255,7 +259,7 @@ def add_workload_constraints(model, workload_dict, skill_to_employees, timeslots
             # TODO: Add constraints for optimal workload if necessary
 
         # Constraint: An employee should not be booked multiple times in the same timeslot
-        for e in manager_employee_ids:
+        for e in all_employee_ids:
             employee_assignments = [
                 timeslots_vars.get((e, day, hour)) 
                 for skill in skills 
@@ -266,22 +270,24 @@ def add_workload_constraints(model, workload_dict, skill_to_employees, timeslots
                 # Ensure the employee is assigned to at most one skill in this timeslot
                 model.Add(sum(employee_assignments) <= 1)
 
-            # Manager assignment constraints
-            for skill in skills:
-                if workload_dict.get((ts, skill), {}).get('MinAmount', 0) > 0:
-                    manager_assignments = [
-                        timeslots_vars.get((e, day, hour))
-                        for e in manager_employee_ids
-                        if (e, day, hour) in timeslots_vars
-                    ]
-                    if manager_assignments:
-                        model.Add(sum(manager_assignments) >= 1)
-                    else:
-                        logging.warning(f"No valid manager assignments found for TimeslotID {ts}, Day {day}, Hour {hour}.")
+        # Constraint: At least one manager must be assigned if minimum workload requires
+        for skill in skills:
+            if workload_dict.get((ts, skill), {}).get('MinAmount', 0) > 0:
+                manager_assignments = [
+                    timeslots_vars.get((e, day, hour))
+                    for e in manager_employee_ids
+                    if (e, day, hour) in timeslots_vars
+                ]
+                if manager_assignments:
+                    model.Add(sum(manager_assignments) >= 1)
+                else:
+                    logging.warning(
+                        f"No valid manager assignments found for TimeslotID {ts}, Day {day}, Hour {hour}."
+                    )
     logging.info("Workload constraints added successfully.")
 
 
-def setup_constraints(model, timeslots_vars, work_e_d, employees_df, workload_dict, skill_to_employees, timeslots_df, skills, num_employees, num_days, hours_blocks, num_timeslots, manager_employee_ids, enable_work_indicator=True, enable_transition=True, enable_consecutive_days_off=True, enable_hours=True, enable_workload=True):
+def setup_constraints(model, timeslots_vars, work_e_d, employees_df, workload_dict, skill_to_employees, timeslots_df, skills, num_employees, num_days, hours_blocks, num_timeslots, manager_employee_ids, all_employee_ids, enable_work_indicator=True, enable_transition=True, enable_consecutive_days_off=True, enable_hours=True, enable_workload=True):
     """
     Sets up all constraints based on the provided flags.
 
@@ -299,6 +305,7 @@ def setup_constraints(model, timeslots_vars, work_e_d, employees_df, workload_di
         hours_blocks (int): Number of hourly blocks per day.
         num_timeslots (int): Number of timeslots.
         manager_employee_ids (list): List of EmployeeIDs who are managers.
+        all_employee_ids (list): List of all EmployeeIDs.
         enable_work_indicator (bool): Flag to enable/disable work indicator constraints.
         enable_transition (bool): Flag to enable/disable transition constraints.
         enable_consecutive_days_off (bool): Flag to enable/disable consecutive days off constraints.
@@ -322,7 +329,7 @@ def setup_constraints(model, timeslots_vars, work_e_d, employees_df, workload_di
     if enable_workload:
         add_workload_constraints(
             model, workload_dict, skill_to_employees, timeslots_vars,
-            timeslots_df, skills, num_timeslots, num_days, hours_blocks, manager_employee_ids
+            timeslots_df, skills, num_timeslots, num_days, hours_blocks, manager_employee_ids, all_employee_ids
         )
 
     logging.info("All enabled constraints have been set up.")
@@ -333,102 +340,127 @@ def main():
     Main function to set up and solve the CP model.
     """
     try:
-        # Connect to the database
-        con = duckdb.connect(DATABASE_PATH)
-        logging.info("Connected to DuckDB database.")
+        # Connect to the database using a context manager
+        with duckdb.connect(DATABASE_PATH) as con:
+            logging.info("Connected to DuckDB database.")
 
-        model = cp_model.CpModel()
+            model = cp_model.CpModel()
 
-        # Fetch data
-        employees = con.execute("SELECT * FROM Employees").fetchdf()
-        employees_df = pl.from_pandas(employees)
+            # Fetch data from the database
+            employees_df = pl.from_pandas(con.execute("SELECT * FROM Employees").fetchdf())
+            timeslots_df = pl.from_pandas(con.execute("SELECT * FROM Timeslot").fetchdf())
+            employees_skills_df = pl.from_pandas(con.execute("SELECT * FROM EmployeesSkills").fetchdf())
+            workload_df = pl.from_pandas(con.execute("SELECT * FROM Workload").fetchdf())
 
-        timeslots = con.execute("SELECT * FROM Timeslot").fetchdf()
-        timeslots_df = pl.from_pandas(timeslots)
+            # Retrieve basic parameters
+            num_employees = employees_df.height
+            hours_blocks = HOURS_BLOCKS
+            num_days = con.execute(
+                "SELECT COUNT(DISTINCT CAST(Datetime AS DATE)) as days FROM Timeslot"
+            ).fetchone()[0]
+            num_timeslots = timeslots_df.height
+            skills = [
+                row[0] for row in con.execute("SELECT DISTINCT SkillID FROM Workload").fetchall()
+            ]
 
-        employees_skills = con.execute("SELECT * FROM EmployeesSkills").fetchdf()
-        employees_skills_df = pl.from_pandas(employees_skills)
+            # Get lists of employee IDs
+            all_employee_ids = [
+                item[0] for item in con.execute("SELECT EmployeeID FROM Employees").fetchall()
+            ]
+            manager_employee_ids = [
+                item[0]
+                for item in con.execute(
+                    "SELECT EmployeeID FROM Employees WHERE RoleID = 1"
+                ).fetchall()
+            ]
 
-        workload = con.execute("SELECT * FROM Workload").fetchdf()
-        workload_df = pl.from_pandas(workload)
+            # Initialize dictionaries to store variables
+            timeslots_vars = {
+                (e, d, h): model.NewBoolVar(f"shift_e{e}_d{d}_h{h}")
+                for e in range(num_employees)
+                for d in range(num_days)
+                for h in range(hours_blocks)
+            }
+            work_e_d = {}
 
-        num_employees = employees_df.height
-        hours_blocks = HOURS_BLOCKS
-        num_days = con.execute("SELECT COUNT(DISTINCT CAST(Datetime AS DATE)) as days FROM Timeslot").fetchone()[0]
-        num_timeslots = timeslots_df.height
-        skills_query = con.execute("SELECT DISTINCT SkillID FROM Workload")
-        skills = [row[0] for row in skills_query.fetchall()]
+            # Preprocess workload data
+            workload_dict = {
+                (row['TimeslotID'], row['SkillID']): {
+                    'MinAmount': row['MinAmount'],
+                    'OptAmount': row['OptAmount']
+                }
+                for row in workload_df.iter_rows(named=True)
+            }
 
-        manager_employee_ids = con.execute("SELECT EmployeeID FROM Employees WHERE RoleID = 1").fetchall()
-        manager_employee_ids = [item[0] for item in manager_employee_ids]
+            # Map skills to employees
+            skill_to_employees = {
+                skill: employees_skills_df.filter(pl.col('SkillID') == skill)
+                                           .select('EmployeeID')
+                                           .to_series()
+                                           .to_list()
+                for skill in skills
+            }
 
-        # Initialize dictionaries to store variables
-        timeslots_vars = {}
-        work_e_d = {}
+            # Set up constraints
+            setup_constraints(
+                model=model,
+                timeslots_vars=timeslots_vars,
+                work_e_d=work_e_d,
+                employees_df=employees_df,
+                workload_dict=workload_dict,
+                skill_to_employees=skill_to_employees,
+                timeslots_df=timeslots_df,
+                skills=skills,
+                num_employees=num_employees,
+                num_days=num_days,
+                hours_blocks=hours_blocks,
+                num_timeslots=num_timeslots,
+                manager_employee_ids=manager_employee_ids,
+                all_employee_ids=all_employee_ids,
+                enable_work_indicator=ENABLE_WORK_INDICATOR,
+                enable_transition=ENABLE_TRANSITION,
+                enable_consecutive_days_off=ENABLE_CONSECUTIVE_DAYS_OFF,
+                enable_hours=ENABLE_HOURS,
+                enable_workload=ENABLE_WORKLOAD
+            )
 
-        for e in range(num_employees):
-            for d in range(num_days):
-                for h in range(hours_blocks):
-                    var_name = f"shift_e{e}_d{d}_h{h}"
-                    timeslots_vars[(e, d, h)] = model.NewBoolVar(var_name)
+            logging.info("Constraint setup completed successfully.")
 
-        # Preprocess workload data and skills to employee mapping into dictionaries for quick access
-        workload_dict = {
-            (row['TimeslotID'], row['SkillID']): {'MinAmount': row['MinAmount'], 'OptAmount': row['OptAmount']}
-            for row in workload_df.iter_rows(named=True)
-        }
-        skill_to_employees = {
-            skill: employees_skills_df.filter(pl.col('SkillID') == skill)
-                                       .select('EmployeeID')
-                                       .to_series()
-                                       .to_list()
-            for skill in skills
-        }
+            # Create a solver and solve the model
+            solver = cp_model.CpSolver()
+            logging.info("Starting to solve the model...")
+            status = solver.Solve(model)
 
-        # Set up constraints
-        setup_constraints(
-            model, timeslots_vars, work_e_d, employees_df, workload_dict,
-            skill_to_employees, timeslots_df, skills, num_employees,
-            num_days, hours_blocks, num_timeslots, manager_employee_ids,
-            enable_work_indicator=ENABLE_WORK_INDICATOR,
-            enable_transition=ENABLE_TRANSITION,
-            enable_consecutive_days_off=ENABLE_CONSECUTIVE_DAYS_OFF,
-            enable_hours=ENABLE_HOURS,
-            enable_workload=ENABLE_WORKLOAD
-        )
+            # Process the solution
+            if status in {cp_model.OPTIMAL, cp_model.FEASIBLE}:
+                logging.info(f"Solution found with status: {solver.StatusName(status)}")
 
-        logging.info("Constraint setup completed successfully.")
+                for e in range(num_employees):
+                    for d in range(num_days):
+                        shifts = [
+                            h
+                            for h in range(hours_blocks)
+                            if solver.Value(timeslots_vars[(e, d, h)]) == 1
+                        ]
+                        if shifts:
+                            logging.info(
+                                f"Employee {e} works on day {d} during hours: {shifts}"
+                            )
 
-        # Create a solver and solve the model
-        solver = cp_model.CpSolver()
-        logging.info("Starting to solve the model...")
-        status = solver.Solve(model)
-
-        # Process the solution
-        if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
-            logging.info(f"Solution found with status: {solver.StatusName(status)}")
-            
-            # Print solution details
-            for e in range(num_employees):
-                for d in range(num_days):
-                    shifts = []
-                    for h in range(hours_blocks):
-                        if solver.Value(timeslots_vars[(e, d, h)]) == 1:
-                            shifts.append(h)
-                    if shifts:
-                        logging.info(f"Employee {e} works on day {d} during hours: {shifts}")
-            
-            logging.info(f"Objective value: {solver.ObjectiveValue()}")
-            logging.info(f"Wall time: {solver.WallTime()} seconds")
-        else:
-            logging.error(f"No solution found. Status: {solver.StatusName(status)}")
+                logging.info(f"Objective value: {solver.ObjectiveValue()}")
+                logging.info(f"Wall time: {solver.WallTime()} seconds")
+            else:
+                logging.error(f"No solution found. Status: {solver.StatusName(status)}")
 
     except Exception as e:
         logging.error(f"An error occurred in the solver setup: {e}")
         logging.error(traceback.format_exc())
     finally:
-        con.close()
-        logging.info("Database connection closed.")
+        if con:
+            con.close()
+            logging.info("Database connection closed.")
+        else:
+            logging.warning("No database connection to close.")
 
 
 if __name__ == "__main__":
