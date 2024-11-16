@@ -15,7 +15,9 @@ from app.config import (
     ENABLE_CONSECUTIVE_DAYS_OFF,
     ENABLE_HOURS,
     ENABLE_WORKLOAD,
-    ENABLE_AVAILABILITY
+    ENABLE_AVAILABILITY,
+    ENABLE_MANAGER,
+    ENABLE_ONE_SKILL_PER_TIMESLOT
 )
 
 # Configure logging
@@ -171,14 +173,28 @@ def add_hour_constraints(model, timeslots_vars, employees_df, num_employees, num
         except KeyError as key_err:
             logging.error(f"Key error accessing employee row {e}: {key_err}")
             continue
-        except Exception as e:
-            logging.error(f"Unexpected error in add_hour_constraints for employee {e}: {e}")
+        except Exception as ex:
+            logging.error(f"Unexpected error in add_hour_constraints for employee {e}: {ex}")
             continue
     logging.info("Hour constraints added successfully.")
 
 
 # TO DO: add optimal workload constraints
-def add_workload_constraints(model, workload_dict, skill_to_employees, timeslots_vars, timeslots_df, skills, num_timeslots, num_days, hours_blocks, manager_employee_ids, all_employee_ids):
+def add_workload_constraints(
+    model,
+    workload_dict,
+    skill_to_employees,
+    timeslots_vars,
+    timeslots_df,
+    skills,
+    num_timeslots,
+    num_days,
+    hours_blocks,
+    manager_employee_ids,
+    all_employee_ids,
+    enable_one_skill_per_timeslot=True,
+    enable_manager_requirement=True
+):
     """
     Adds constraints to ensure workload by skill for each timeslot is respected.
 
@@ -194,6 +210,8 @@ def add_workload_constraints(model, workload_dict, skill_to_employees, timeslots
         hours_blocks (int): Number of hourly blocks per day.
         manager_employee_ids (list): List of EmployeeIDs who are managers.
         all_employee_ids (list): List of all EmployeeIDs.
+        enable_one_skill_per_timeslot (bool): If True, enforce that an employee can be assigned to at most one skill per timeslot.
+        enable_manager_requirement (bool): If True, require at least one manager to be assigned when minimum workload is required.
     """
     logging.info("Adding workload constraints.")
     for ts in range(1, num_timeslots + 1):
@@ -221,8 +239,8 @@ def add_workload_constraints(model, workload_dict, skill_to_employees, timeslots
         except KeyError as key_err:
             logging.error(f"Key error accessing timeslot_row for ts={ts}: {key_err}")
             continue
-        except Exception as e:
-            logging.error(f"Unexpected error accessing timeslot_row for ts={ts}: {e}")
+        except Exception as ex:
+            logging.error(f"Unexpected error accessing timeslot_row for ts={ts}: {ex}")
             continue
 
         for skill in skills:
@@ -245,13 +263,15 @@ def add_workload_constraints(model, workload_dict, skill_to_employees, timeslots
                 continue
 
             assigned_vars = [
-                timeslots_vars.get((e, day, hour)) 
-                for e in eligible_employees 
+                timeslots_vars.get((e, day, hour))
+                for e in eligible_employees
                 if (e, day, hour) in timeslots_vars
             ]
 
             if not assigned_vars:
-                logging.warning(f"No shift variables found for eligible employees with SkillID {skill} at TimeslotID {ts}.")
+                logging.warning(
+                    f"No shift variables found for eligible employees with SkillID {skill} at TimeslotID {ts}."
+                )
                 continue
 
             # Add constraints to meet the minimum workload
@@ -259,32 +279,34 @@ def add_workload_constraints(model, workload_dict, skill_to_employees, timeslots
 
             # TODO: Add constraints for optimal workload if necessary
 
-        # Constraint: An employee should not be booked multiple times in the same timeslot
-        for e in all_employee_ids:
-            employee_assignments = [
-                timeslots_vars.get((e, day, hour)) 
-                for skill in skills 
-                if (e, day, hour) in timeslots_vars
-            ]
-
-            if employee_assignments:
-                # Ensure the employee is assigned to at most one skill in this timeslot
-                model.Add(sum(employee_assignments) <= 1)
-
-        # Constraint: At least one manager must be assigned if minimum workload requires
-        for skill in skills:
-            if workload_dict.get((ts, skill), {}).get('MinAmount', 0) > 0:
-                manager_assignments = [
+        if enable_one_skill_per_timeslot:
+            # Constraint: An employee should not be booked multiple times in the same timeslot
+            for e in all_employee_ids:
+                employee_assignments = [
                     timeslots_vars.get((e, day, hour))
-                    for e in manager_employee_ids
+                    for skill in skills
                     if (e, day, hour) in timeslots_vars
                 ]
-                if manager_assignments:
-                    model.Add(sum(manager_assignments) >= 1)
-                else:
-                    logging.warning(
-                        f"No valid manager assignments found for TimeslotID {ts}, Day {day}, Hour {hour}."
-                    )
+
+                if employee_assignments:
+                    # Ensure the employee is assigned to at most one skill in this timeslot
+                    model.Add(sum(employee_assignments) <= 1)
+
+        if enable_manager_requirement:
+            # Constraint: At least one manager must be assigned if minimum workload requires
+            for skill in skills:
+                if workload_dict.get((ts, skill), {}).get('MinAmount', 0) > 0:
+                    manager_assignments = [
+                        timeslots_vars.get((e, day, hour))
+                        for e in manager_employee_ids
+                        if (e, day, hour) in timeslots_vars
+                    ]
+                    if manager_assignments:
+                        model.Add(sum(manager_assignments) >= 1)
+                    else:
+                        logging.warning(
+                            f"No valid manager assignments found for TimeslotID {ts}, Day {day}, Hour {hour}."
+                        )
     logging.info("Workload constraints added successfully.")
 
 
@@ -317,18 +339,17 @@ def add_availability_constraints(model, timeslots_vars, availability_df, num_emp
                         model.Add(timeslots_vars[(e, d, h)] == 0)
                         logging.debug(f"Employee {e} is unavailable on Day {d}, Hour {h}.")
         logging.info("Availability constraints added successfully.")
-    except Exception as e:
-        logging.error(f"An error occurred while adding availability constraints: {e}")
+    except Exception as ex:
+        logging.error(f"An error occurred while adding availability constraints: {ex}")
         logging.error(traceback.format_exc())
-
 
 
 def setup_constraints(model, timeslots_vars, work_e_d, employees_df, workload_dict, skill_to_employees, 
                      timeslots_df, skills, num_employees, num_days, hours_blocks, num_timeslots, 
-                     manager_employee_ids, all_employee_ids, availability_df, roles_df, 
-                     store_assignments_df, enable_availability=True, enable_status=True, 
+                     manager_employee_ids, all_employee_ids, availability_df, enable_availability=True, enable_status=True, 
                      enable_role_based=True, enable_store_assignment=True, enable_work_indicator=True, 
-                     enable_transition=True, enable_consecutive_days_off=True, enable_hours=True, enable_workload=True):
+                     enable_transition=True, enable_consecutive_days_off=True, enable_hours=True, enable_workload=True,
+                     enable_manager=True, enable_one_skill_per_timeslot=True):
     """
     Sets up all constraints based on the provided flags.
 
@@ -348,8 +369,6 @@ def setup_constraints(model, timeslots_vars, work_e_d, employees_df, workload_di
         manager_employee_ids (list): List of EmployeeIDs who are managers.
         all_employee_ids (list): List of all EmployeeIDs.
         availability_df (pl.DataFrame): DataFrame containing availability preferences.
-        roles_df (pl.DataFrame): DataFrame containing role information.
-        store_assignments_df (pl.DataFrame): DataFrame containing employee-store assignments.
         enable_availability (bool): Flag to enable/disable availability constraints.
         enable_status (bool): Flag to enable/disable status constraints.
         enable_role_based (bool): Flag to enable/disable role-based constraints.
@@ -359,6 +378,8 @@ def setup_constraints(model, timeslots_vars, work_e_d, employees_df, workload_di
         enable_consecutive_days_off (bool): Flag to enable/disable consecutive days off constraints.
         enable_hours (bool): Flag to enable/disable hour constraints.
         enable_workload (bool): Flag to enable/disable workload constraints.
+        enable_manager (bool): Flag to enable/disable manager constraints.
+        enable_one_skill_per_timeslot (bool): Flag to enable/disable one skill per timeslot constraints.
     """
     logging.info("Setting up constraints.")
 
@@ -380,7 +401,8 @@ def setup_constraints(model, timeslots_vars, work_e_d, employees_df, workload_di
     if enable_workload:
         add_workload_constraints(
             model, workload_dict, skill_to_employees, timeslots_vars,
-            timeslots_df, skills, num_timeslots, num_days, hours_blocks, manager_employee_ids, all_employee_ids
+            timeslots_df, skills, num_timeslots, num_days, hours_blocks, manager_employee_ids, all_employee_ids,
+            enable_one_skill_per_timeslot=ENABLE_ONE_SKILL_PER_TIMESLOT, enable_manager_requirement=ENABLE_MANAGER
         )
 
     logging.info("All enabled constraints have been set up.")
@@ -475,7 +497,9 @@ def main():
                 enable_transition=ENABLE_TRANSITION,
                 enable_consecutive_days_off=ENABLE_CONSECUTIVE_DAYS_OFF,
                 enable_hours=ENABLE_HOURS,
-                enable_workload=ENABLE_WORKLOAD
+                enable_workload=ENABLE_WORKLOAD,
+                enable_manager=ENABLE_MANAGER,
+                enable_one_skill_per_timeslot=ENABLE_ONE_SKILL_PER_TIMESLOT
             )
 
             logging.info("Constraint setup completed successfully.")
@@ -506,15 +530,10 @@ def main():
             else:
                 logging.error(f"No solution found. Status: {solver.StatusName(status)}")
 
-    except Exception as e:
-        logging.error(f"An error occurred in the solver setup: {e}")
+    except Exception as ex:
+        logging.error(f"An error occurred in the solver setup: {ex}")
         logging.error(traceback.format_exc())
-    finally:
-        if con:
-            con.close()
-            logging.info("Database connection closed.")
-        else:
-            logging.warning("No database connection to close.")
+    # Removed the finally block as the 'with' statement handles database connection closure.
 
 
 if __name__ == "__main__":
