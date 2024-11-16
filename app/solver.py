@@ -173,7 +173,7 @@ def add_hour_constraints(model, timeslots_vars, employees_df, num_employees, num
             continue
     logging.info("Hour constraints added successfully.")
 
-
+# TO DO: add optimal workload constraints
 def add_workload_constraints(model, workload_dict, skill_to_employees, timeslots_vars, timeslots_df, skills, num_timeslots, num_days, hours_blocks, manager_employee_ids):
     """
     Adds constraints to ensure workload by skill for each timeslot is respected.

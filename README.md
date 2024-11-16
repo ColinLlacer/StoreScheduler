@@ -1,7 +1,9 @@
-# Store Scheduler (WIP + has to be refactored)
+# Store Scheduler (WIP)
 
 ## Overview
 A Python-based scheduling system designed to optimize employee scheduling for retail stores. This project uses advanced optimization techniques (Constraint Programming with OR-Tools) to create efficient work schedules while considering employee availability, skills, and store requirements.
+
+Currently, the system only supports a single store at a time, and hard constraints are used for all constraints. A few constraints are still work in progress.
 
 ## Features (Work in Progress)
 - Employee management with skill tracking
@@ -24,7 +26,9 @@ The system uses DuckDB as its database engine with the following main tables:
 - **Workload**: Defines required staffing levels for different skills and time slots
 - **Store**: Stores information about retail locations
 
-## Dependencies
+The expected schema can be found in the schema.sql file.
+
+## Dependencies (installable with poetry)
 - Python 3.10+
 - OR-Tools
 - Polars
