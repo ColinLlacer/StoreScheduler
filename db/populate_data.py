@@ -6,12 +6,14 @@ import os
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def populate_tables():
+def populate_tables(db_path: str = "db/db.duckdb"):
     try:
-        # Connect to DuckDB in the db folder
-        db_path = os.path.join(os.path.dirname(__file__), "db.duckdb")
+        # Ensure the directory exists
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+
+        # Connect to DuckDB
         con = duckdb.connect(db_path)
-        logging.info("Connected to the database successfully.")
+        logging.info(f"Connected to DuckDB at {db_path}")
 
         # ---------------------------
         # Populate the tables

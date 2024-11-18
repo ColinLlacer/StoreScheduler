@@ -4,14 +4,24 @@ version = "0.1.0"
 description = ""
 authors = ["Colin Llacer <colin.llacer@gmail.com>"]
 readme = "README.md"
+packages = [
+    { include = "db", from = "." },
+    { include = "tests", from = "." }
+]
 
 [tool.poetry.dependencies]
 python = "^3.10"
 ortools = "^9.11.4210"
 polars = "^1.12.0"
 duckdb = "^1.1.3"
+pytest = "^8.3.3"
 
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+pythonpath = [
+    "."
+]
